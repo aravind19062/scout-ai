@@ -1,6 +1,7 @@
 import { MessageSquare, Microscope, Send } from 'lucide-react'
 import { useState } from 'react'
 import { useAsync } from '../hooks/useAsync'
+import { useDemo } from '../hooks/useDemo'
 import { api } from '../services/api'
 import { Markdown } from './Markdown'
 import { Button, Card, CardHeader, Spinner } from './ui'
@@ -12,6 +13,7 @@ export function FollowUpPanel({ jobId, enabled, onDeepen }: { jobId: string; ena
   const [deep, setDeep] = useState('')
   const [deepening, setDeepening] = useState(false)
   const [err, setErr] = useState<string>()
+  const demo = useDemo()
 
   async function ask() {
     setAsking(true)
@@ -83,14 +85,14 @@ export function FollowUpPanel({ jobId, enabled, onDeepen }: { jobId: string; ena
           {err && <p className="text-sm text-rose-600">{err}</p>}
         </div>
       </Card>
-      <Card className="self-start">
+      {!demo?.enabled && <Card className="self-start">
         <CardHeader title="Request deeper investigation" subtitle="Runs another targeted research round, re-verifies, and produces a new report version." icon={<Microscope className="h-4 w-4" />} />
         <div className="space-y-3 p-5">
           <textarea value={deep} onChange={(e) => setDeep(e.target.value)} rows={3} disabled={!enabled}
             placeholder="e.g. battery recycling capacity and policy" className="w-full rounded-lg border border-slate-200 p-2.5 text-sm focus:border-indigo-400 focus:outline-none disabled:bg-slate-50" />
           <Button className="w-full" variant="secondary" onClick={deepen} loading={deepening} disabled={!enabled || deep.trim().length < 3}>Investigate further</Button>
         </div>
-      </Card>
+      </Card>}
     </div>
   )
 }

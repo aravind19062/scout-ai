@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     embedding_batch_size: int = 64
 
     tavily_api_key: SecretStr | None = None
+    mock_latency_ms: int = 0  # mock LLM only: artificial delay per call, so offline demos stream like real runs
 
     # Pricing used for cost *estimates*, in USD per 1M tokens. Set these to your actual
     # contract prices; the defaults are placeholders and are labelled as estimates in the UI.
@@ -71,8 +72,41 @@ class Settings(BaseSettings):
     retrieval_mode: Literal["hybrid", "vector", "keyword"] = "hybrid"  # per retriever (vector / keyword) before fusion
 
     # --- Orchestration -----------------------------------------------------------------------
-    max_concurrent_jobs: int = 3
+    max_concurrent_jobs: int = 3  # per process (API in inline mode, each worker in worker mode)
     llm_max_retries: int = 3
+    # "inline": jobs run as asyncio tasks in the API process (single replica, zero extra services).
+    # "worker": the API only enqueues; `python -m app.worker` processes claim jobs from Postgres
+    # (FOR UPDATE SKIP LOCKED), heartbeat them, and requeue jobs whose worker died.
+    job_execution: Literal["inline", "worker"] = "inline"
+    worker_poll_s: float = 2.0
+    worker_heartbeat_s: float = 10.0
+    worker_lease_s: float = 60.0  # a running job without a heartbeat for this long is considered orphaned
+    worker_max_attempts: int = 3
+
+    # --- Reranking ---------------------------------------------------------------------------
+    # "cross_encoder": local ONNX cross-encoder (fastembed) re-scores the fused candidates.
+    # "lexical": dependency-free token-overlap reranker (tests / offline). "none": RRF order only.
+    reranker: Literal["none", "cross_encoder", "lexical"] = "none"
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_candidates: int = 30  # fused candidates passed to the reranker
+    # Graceful degradation: if reranking (including waiting for the per-process inference slot) takes
+    # longer than this, the first-stage order is used instead. Keeps agents moving on a busy CPU.
+    rerank_timeout_s: float = 5.0
+    reranker_threads: int | None = None  # ONNX intra-op threads per process (None = onnxruntime default)
+
+    # --- Observability -----------------------------------------------------------------------
+    # Traces are exported over OTLP/HTTP when an endpoint is set (e.g. Jaeger at http://jaeger:4318).
+    otel_exporter_otlp_endpoint: str | None = None
+    otel_service_name: str = "scout-ai"
+
+    # --- Public demo guardrails --------------------------------------------------------------
+    # When enabled: depth is capped, each client gets a daily job quota, and new jobs are refused
+    # once today's total estimated spend across all jobs reaches the cap.
+    demo_mode: bool = False
+    demo_max_depth: Literal["quick", "standard", "deep"] = "quick"
+    demo_jobs_per_client_per_day: int = 3
+    demo_daily_cost_cap_usd: float = 2.0
+    demo_allow_uploads: bool = False
 
     def provider_problems(self) -> list[str]:
         """Missing-credential problems for the configured providers. Called at app startup

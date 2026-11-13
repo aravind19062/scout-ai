@@ -1,0 +1,11 @@
+{$DOMAIN} {
+	encode zstd gzip
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+	# Caddy replaces any client-supplied X-Forwarded-For with the real peer address.
+	reverse_proxy frontend:80 {
+		flush_interval -1 # Server-Sent Events
+	}
+}

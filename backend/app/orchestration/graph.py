@@ -15,6 +15,7 @@ Design choices (see docs/AGENT_WORKFLOW.md):
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from typing import TypedDict
 
@@ -27,6 +28,7 @@ from app.agents.reporter import generate_report
 from app.agents.researcher import run_pending_tasks
 from app.agents.verifier import verify_pending
 from app.core.errors import BudgetExceeded
+from app.core.tracing import set_attrs, span
 from app.database.session import session_scope
 from app.llm.usage import Limits
 from app.models import ResearchJob
@@ -61,15 +63,25 @@ def build_graph(ctx: JobContext):
                 return {}
             await _persist(ctx, stage=stage)
             await ctx.emit("stage", f"Stage: {stage.replace('_', ' ')}", stage)
-            try:
-                await ctx.check_cancelled()
-                if stage != "report":
-                    ctx.usage.check()
-                updates = await fn(state) or {}
-            except BudgetExceeded as e:
-                await ctx.emit("halted", f"Execution limit reached ({e.limit}); writing report with evidence gathered so far", stage, limit=e.limit)
-                await _persist(ctx, halt_reason=e.limit)
-                updates = {"halt_reason": e.limit}
+            ctx.usage.stage = stage  # attribute tokens/cost/tool calls to this agent
+            t0 = time.monotonic()
+            with span(f"agent.{stage}", **{"scout.job_id": str(ctx.job_id), "scout.iteration": state.get("iteration", 0)}) as sp:
+                try:
+                    await ctx.check_cancelled()
+                    if stage != "report":
+                        ctx.usage.check()
+                    updates = await fn(state) or {}
+                except BudgetExceeded as e:
+                    sp.set_attribute("scout.halted", e.limit)
+                    await ctx.emit("halted", f"Execution limit reached ({e.limit}); writing report with evidence gathered so far", stage, limit=e.limit)
+                    await _persist(ctx, halt_reason=e.limit)
+                    updates = {"halt_reason": e.limit}
+                finally:
+                    ctx.usage.add_stage_time(stage, time.monotonic() - t0)
+                    b = ctx.usage.by_stage.get(stage, {})
+                    set_attrs(sp, **{"scout.cost_usd": round(b.get("cost_usd", 0.0), 6), "scout.llm_calls": b.get("llm_calls", 0),
+                                     "scout.tool_calls": b.get("tool_calls", 0)})
+                    ctx.usage.stage = None
             await _persist(ctx)
             return updates
 

@@ -42,5 +42,16 @@ services:
     ports:
       - "8080:80"
 
+  # Optional tracing UI: `docker compose --profile observability up -d`, set
+  # OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in .env, then open http://localhost:16686
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+
 volumes:
   pgdata:

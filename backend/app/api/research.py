@@ -11,9 +11,12 @@ from sqlalchemy.orm import selectinload
 from sse_starlette.sse import EventSourceResponse
 
 from app.agents.reporter import report_markdown
+from app.core import demo
+from app.core.config import get_settings
 from app.core.errors import ConflictError, NotFoundError
 from app.database.session import get_session, session_scope
 from app.models import Claim, Finding, FollowUp, Report, ResearchJob, ResearchTask, Source
+from app.orchestration.depth import get_depth
 from app.orchestration.events import event_bus
 from app.orchestration.runner import TERMINAL, job_manager
 from app.schemas.api import (
@@ -44,19 +47,25 @@ async def _job(session: AsyncSession, job_id: uuid.UUID) -> ResearchJob:
 
 
 @router.post("", response_model=JobSummary, status_code=202)
-async def create_research(body: CreateResearch):
+async def create_research(body: CreateResearch, request: Request):
     """Start an autonomous research job. Progress streams from `/events`."""
-    return await svc.create_job(body.question, body.depth, body.document_ids)
+    async with session_scope() as s:
+        key = await demo.check_new_job(s, request, body.depth, get_depth(body.depth).max_cost_usd)
+    return await svc.create_job(body.question, body.depth, body.document_ids, client_key=key)
 
 
 @router.get("", response_model=list[JobSummary])
 async def list_research(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     status: str | None = None,
 ):
     stmt = select(ResearchJob).order_by(ResearchJob.created_at.desc()).limit(limit).offset(offset)
+    if get_settings().demo_mode:
+        # Public demo: visitors see only their own sessions, never other people's questions.
+        stmt = stmt.where(ResearchJob.client_key == demo.client_key(request))
     if status:
         stmt = stmt.where(ResearchJob.status == status)
     return list((await session.execute(stmt)).scalars())
@@ -84,7 +93,7 @@ async def get_research(job_id: uuid.UUID, session: AsyncSession = Depends(get_se
 @router.delete("/{job_id}", status_code=204)
 async def delete_research(job_id: uuid.UUID, session: AsyncSession = Depends(get_session)):
     job = await _job(session, job_id)
-    if job_manager.is_running(job_id):
+    if job_manager.is_running(job_id) or job.status in ("running", "queued"):
         raise ConflictError("Cancel the job before deleting it")
     await session.execute(delete(Source).where(Source.collection == f"job:{job_id}"))
     await session.delete(job)
@@ -105,6 +114,7 @@ async def resume_research(job_id: uuid.UUID):
 
 @router.post("/{job_id}/deepen", response_model=JobSummary, status_code=202)
 async def deepen_research(job_id: uuid.UUID, body: DeepenRequest):
+    demo.forbid_in_demo("'Investigate further'")
     return await svc.deepen(job_id, body.instructions)
 
 
@@ -209,6 +219,7 @@ async def export_report(job_id: uuid.UUID, format: str = Query("md", pattern="^(
 
 @router.post("/{job_id}/report/sections/{key}/regenerate", response_model=ReportOut)
 async def regenerate_section(job_id: uuid.UUID, key: str):
+    demo.forbid_in_demo("Section regeneration")
     return await svc.regenerate_section(job_id, key)
 
 
@@ -224,4 +235,5 @@ async def create_followup(job_id: uuid.UUID, body: FollowUpRequest, session: Asy
     if job.status not in ("completed",):
         raise ConflictError("Follow-up questions are available once research has completed")
     await session.close()
+    await demo.check_budget(session)
     return await svc.ask_followup(job_id, body.question)

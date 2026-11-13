@@ -256,9 +256,14 @@ class MockProvider:
         self.calls: list[str] = []
 
     async def structured(self, req: LLMRequest, schema: type[T]) -> LLMResponse:
+        import asyncio
+
+        from app.core.config import get_settings
         from app.core.errors import ProviderError
 
         self.calls.append(req.task)
+        if latency := get_settings().mock_latency_ms:  # simulate model latency (offline demos, crash tests)
+            await asyncio.sleep(latency / 1000)
         if req.task in self.fail_tasks:
             raise ProviderError(f"mock failure injected for task '{req.task}'")
         handler = HANDLERS.get(req.task)

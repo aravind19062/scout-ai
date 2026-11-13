@@ -13,9 +13,11 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,6 +29,7 @@ JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 class ResearchJob(Base):
     __tablename__ = "research_jobs"
+    __table_args__ = (Index("ix_research_jobs_queued", "created_at", postgresql_where=text("status = 'queued'")),)
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     question: Mapped[str] = mapped_column(Text)
@@ -43,6 +46,12 @@ class ResearchJob(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider_mode: Mapped[dict] = mapped_column(JSONType, default=dict)
+    # Durable queue (JOB_EXECUTION=worker): which worker holds the job, its last heartbeat, and how
+    # many times it has been claimed (a job whose worker dies is requeued until worker_max_attempts).
+    worker_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    run_attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    client_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # hashed client IP, for demo quotas
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

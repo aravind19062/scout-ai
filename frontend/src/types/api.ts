@@ -15,6 +15,19 @@ export interface Usage {
   fetch_calls?: number
   cost_usd?: number
   elapsed_s?: number
+  by_stage?: Record<string, StageUsage>
+}
+
+/** Usage attributed to one agent stage (plan, research, analyze, verify, gap_plan, report, followup). */
+export interface StageUsage {
+  llm_calls: number
+  llm_cache_hits?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  embedding_tokens?: number
+  tool_calls: number
+  cost_usd: number
+  elapsed_s: number
 }
 
 export interface JobSummary {
@@ -181,7 +194,14 @@ export interface AppConfig {
   mock_mode: boolean
   depths: Record<Depth, Record<string, number | string>>
   upload: { max_mb: number; types: string[] }
+  job_execution: 'inline' | 'worker'
+  reranker: 'none' | 'cross_encoder' | 'lexical'
+  demo: DemoStatus
 }
+
+export type DemoStatus =
+  | { enabled: false }
+  | { enabled: true; max_depth: Depth; jobs_per_day: number; jobs_used_today: number; uploads: boolean; budget_remaining_fraction: number }
 
 export interface UsageTotals {
   jobs: number
@@ -191,6 +211,10 @@ export interface UsageTotals {
   llm_calls: number
   llm_cache_hits: number
   by_status: Partial<Record<JobStatus, number>>
+  by_stage: Record<string, Pick<StageUsage, 'cost_usd' | 'elapsed_s' | 'llm_calls' | 'tool_calls'>>
+  per_completed_job: { avg_cost_usd: number | null; avg_elapsed_s: number | null }
+  llm_cache_hit_rate: number | null
+  claims: { by_status: Partial<Record<ClaimStatus, number>>; supported_rate: number | null }
 }
 
 export interface RagAnswer {

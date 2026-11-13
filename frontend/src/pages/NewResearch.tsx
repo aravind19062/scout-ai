@@ -33,13 +33,20 @@ export function NewResearch() {
   const fileRef = useRef<HTMLInputElement>(null)
 
   const examples = cfg.data?.mock_mode ? [MOCK_EXAMPLE, ...EXAMPLES] : EXAMPLES
-  const valid = question.trim().length >= 10
+  const demo = cfg.data?.demo
+  const order: Depth[] = ['quick', 'standard', 'deep']
+  const allowed = (d: Depth) => !demo?.enabled || order.indexOf(d) <= order.indexOf(demo.max_depth)
+  // In the demo, a depth above the cap is never submitted (derived, so no state sync needed).
+  const effectiveDepth: Depth = allowed(depth) ? depth : demo?.enabled ? demo.max_depth : depth
+  const quotaUsed = !!demo?.enabled && demo.jobs_used_today >= demo.jobs_per_day
+  const uploadsAllowed = !demo?.enabled || demo.uploads
+  const valid = question.trim().length >= 10 && !quotaUsed
 
   async function submit() {
     setSubmitting(true)
     setError(undefined)
     try {
-      const job = await api.createResearch(question, depth, selected)
+      const job = await api.createResearch(question, effectiveDepth, selected)
       nav(`/research/${job.id}`)
     } catch (e) {
       setError((e as Error).message)
@@ -102,13 +109,16 @@ export function NewResearch() {
         <div className="grid gap-3 p-5 sm:grid-cols-3">
           {DEPTHS.map(({ key, title, blurb, icon: Icon }) => {
             const d = cfg.data?.depths[key]
+            const ok = allowed(key)
             return (
               <button
                 key={key}
                 onClick={() => setDepth(key)}
-                className={clsx('rounded-xl border p-4 text-left transition', depth === key ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300')}
+                disabled={!ok}
+                title={ok ? undefined : 'Not available in the public demo'}
+                className={clsx('rounded-xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-50', effectiveDepth === key ? 'border-indigo-500 bg-indigo-50/50 ring-2 ring-indigo-500/20' : 'border-slate-200 hover:border-slate-300')}
               >
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon className="h-4 w-4 text-indigo-600" /> {title}</div>
+                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900"><Icon className="h-4 w-4 text-indigo-600" /> {title}{!ok && <span className="ml-auto text-[10px] font-normal uppercase text-slate-400">demo limit</span>}</div>
                 <p className="mt-1 text-xs text-slate-500">{blurb}</p>
                 {d && (
                   <dl className="mt-3 grid grid-cols-2 gap-x-2 gap-y-1 text-[11px] text-slate-500">
@@ -133,7 +143,7 @@ export function NewResearch() {
           action={
             <>
               <input ref={fileRef} type="file" multiple accept=".pdf,.txt,.md,.html,.htm" className="hidden" onChange={(e) => onUpload(e.target.files)} />
-              <Button variant="secondary" size="sm" loading={uploading} onClick={() => fileRef.current?.click()}><Upload className="h-3.5 w-3.5" /> Upload</Button>
+              <Button variant="secondary" size="sm" loading={uploading} disabled={!uploadsAllowed} title={uploadsAllowed ? undefined : 'Uploads are disabled in the public demo'} onClick={() => fileRef.current?.click()}><Upload className="h-3.5 w-3.5" /> Upload</Button>
             </>
           }
         />
@@ -162,6 +172,7 @@ export function NewResearch() {
         </div>
       </Card>
 
+      {quotaUsed && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">You have used today's {demo?.enabled && demo.jobs_per_day} demo research sessions. Come back tomorrow, or run SCOUT AI locally with your own API keys.</div>}
       {error && <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div>}
 
       <div className="flex justify-end gap-3">

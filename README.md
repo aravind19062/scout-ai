@@ -20,19 +20,25 @@ citation in the report resolves to a page the system actually retrieved.
 - **Standalone RAG**: upload PDFs/text to a library, query them with grounded, cited answers, or attach them to research.
 - **Live UI**: React dashboard with real-time progress over Server-Sent Events (plan, searches, sources, findings, verdicts).
 - **Reliability**: persisted state, resume after failure/cancel/restart, cancellation, retries, LLM response cache (resumes never pay twice), rate limiting, prompt-injection defences.
-- **Evaluation framework**: retrieval (P@k, R@k, MRR, nDCG), answer (fact recall, faithfulness, relevance), citation (URL validity, support rate), agent and system metrics, with direct-LLM / single-pass-RAG / agent baselines.
+- **Evaluation framework**: retrieval (P@k, R@k, MRR, nDCG, latency, with/without reranking), answer (fact recall, faithfulness, relevance), citation (URL validity, support rate), agent and system metrics, with direct-LLM / single-pass-RAG / agent baselines.
+- **Horizontally scalable workers**: a Postgres-backed job queue (`FOR UPDATE SKIP LOCKED`) with leases, heartbeats, automatic requeue of jobs whose worker died, and graceful hand-back on shutdown. Crash-tested with `SIGKILL`.
+- **Two-stage retrieval**: hybrid first stage + optional local cross-encoder reranker (ONNX, no GPU, no API cost).
+- **Observability**: OpenTelemetry traces (one trace per job; spans per agent, LLM call, tool call and retrieval, using GenAI semantic conventions) and per-agent cost/time attribution shown in the UI.
+- **Production deployment**: Caddy (automatic HTTPS) + nginx + API + N workers + Postgres in one compose file; public-demo guardrails (depth cap, per-visitor quota, global daily spend cap with in-flight reservation).
+- **CI**: GitHub Actions runs ruff, migration up/down/up, the full pytest suite against pgvector, oxlint, the TypeScript build and Docker image builds.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
   UI[React + Vite UI] -- REST + SSE --> API[FastAPI]
-  API --> JM[Job manager<br/>asyncio tasks]
-  JM --> G[LangGraph workflow]
+  API -- enqueue --> Q[(Job queue<br/>Postgres SKIP LOCKED)]
+  Q -- claim / heartbeat --> W[Workers × N]
+  W --> G[LangGraph workflow]
   G --> P[Planner] & R[Researcher] & A[Analyst] & V[Verifier] & W[Reporter]
   R --> S[(Search provider<br/>Tavily / mock)]
   R --> F[Safe fetcher<br/>HTML/PDF extract]
-  R & V & W --> RAG[RAG: chunk · embed · hybrid retrieve]
+  R & V & W --> RAG[RAG: chunk · embed · hybrid retrieve · rerank]
   P & R & A & V & W --> LLM[LLM gateway<br/>budget · cache · usage]
   RAG --> PG[(PostgreSQL + pgvector)]
   G --> PG
@@ -57,7 +63,8 @@ Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/AGENT_WORKFLOW.md](
 | Data | PostgreSQL 17 + pgvector (HNSW cosine) + Postgres full-text search |
 | Retrieval | Tavily search, httpx, trafilatura, pypdf, tiktoken |
 | Frontend | React 19, TypeScript, Vite 8, Tailwind CSS 4, react-markdown |
-| Infra | Docker, Docker Compose, nginx, structlog, pytest |
+| Infra | Docker, Docker Compose, nginx, Caddy, GitHub Actions, OpenTelemetry + Jaeger, structlog, pytest |
+| Reranking | fastembed (ONNX) cross-encoder `ms-marco-MiniLM-L-6-v2` |
 
 ## Prerequisites
 
@@ -89,6 +96,10 @@ All settings come from environment variables (see [.env.example](.env.example)).
 | `EMBEDDING_MODEL`, `EMBEDDING_DIM` | Default `text-embedding-3-small` / 1536 (must match the migration) |
 | `PRICE_*_PER_MTOK` | Prices used for **cost estimates**; set them to your actual prices |
 | `RETRIEVAL_MODE` | `hybrid` (default), `vector` or `keyword` |
+| `RERANKER` | `none` (default), `cross_encoder` (local ONNX model, `uv sync --extra rerank`) or `lexical` |
+| `JOB_EXECUTION` | `inline` (jobs in the API process) or `worker` (Postgres queue + `python -m app.worker`) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Enables trace export (e.g. Jaeger `http://localhost:4318`) |
+| `DEMO_MODE`, `DEMO_*` | Public-demo guardrails: depth cap, per-visitor daily quota, daily spend cap |
 | `DATABASE_URL` | Defaults to the compose Postgres on `localhost:5433` |
 
 ## Local development
@@ -104,6 +115,27 @@ uv run uvicorn app.main:app --port 8010 --reload
 cd ../frontend
 nvm use && npm install
 npm run dev                                  # http://localhost:5173 (proxies /api to :8010)
+```
+
+## Production deployment (single VM)
+
+```bash
+# DNS: point DOMAIN at the VM. Then:
+cp .env.example .env    # real API keys, DOMAIN=…, a strong POSTGRES_PASSWORD, demo limits
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --scale worker=4   # more workers
+```
+
+Caddy obtains the TLS certificate and is the only service exposed to the internet. Research runs in worker
+containers; demo guardrails are on by default. Add `--profile observability` and set
+`OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318` to collect traces (Jaeger UI bound to the VM's localhost:16686).
+
+## Running workers locally
+
+```bash
+# terminal 1 (API)          # terminal 2..n (workers)
+JOB_EXECUTION=worker uv run uvicorn app.main:app --port 8010
+                            JOB_EXECUTION=worker uv run python -m app.worker
 ```
 
 ## Tests
@@ -124,7 +156,7 @@ verification rules, report generation, failure handling, budgets, cancellation a
 
 ```bash
 cd backend
-uv run python -m app.evaluation.run retrieval --dataset ../evaluation/datasets/retrieval_fixture.json
+uv run --extra rerank python -m app.evaluation.run retrieval --dataset ../evaluation/datasets/retrieval_fixture.json
 uv run python -m app.evaluation.run e2e --dataset ../evaluation/datasets/freedonia_mock.json --depth standard
 # with real keys configured:
 uv run python -m app.evaluation.run e2e --dataset ../evaluation/datasets/real_world.json --depth quick
@@ -143,8 +175,9 @@ results actually measured so far (mock mode only; no live run has been performed
 
 - **No live (OpenAI + Tavily) run has been executed in this repository yet**; all measured results are from mock mode. Mock results measure pipeline mechanics, not model quality.
 - Verification establishes that retrieved sources *state* a claim; it cannot establish that the sources are right. Source reliability is not scored (only domain diversity).
-- Jobs run in the API process (bounded concurrency). Multiple API replicas would need a shared queue and a shared rate limiter (see ARCHITECTURE.md).
-- No authentication or multi-tenancy: designed as a single-user/self-hosted tool.
+- The API rate limiter is in-memory (per API replica). Demo quotas and the job queue are in Postgres and are global.
+- No user accounts or multi-tenancy: designed as a self-hosted tool, or a public demo protected by quotas and a spend cap.
+- The reranker comparison so far uses the small fictional fixture set, where reranking helps but a simple lexical reranker ties the cross-encoder; a real-world comparison is pending.
 - Scanned PDFs are not OCR'd; JavaScript-rendered pages may extract poorly; paywalled pages are skipped.
 - SSRF protection validates DNS before each request and redirect; a DNS-rebinding window remains (SECURITY.md).
 

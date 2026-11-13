@@ -63,6 +63,13 @@ export function AppLayout() {
             <span><b>Mock mode.</b> Offline providers and a fictional fixture corpus are active. Results are not real research. Configure API keys in <code>.env</code> for real research.</span>
           </div>
         )}
+        {cfg.data?.demo.enabled && (
+          <div className="no-print flex flex-wrap items-center gap-x-2 border-b border-indigo-200 bg-indigo-50 px-6 py-2 text-xs text-indigo-800">
+            <Telescope className="h-4 w-4" />
+            <span><b>Public demo.</b> Runs on a shared daily budget: up to {cfg.data.demo.jobs_per_day} sessions per visitor per day, depth up to “{cfg.data.demo.max_depth}”. Your sessions are visible only to you.</span>
+            <span className="text-indigo-600">{cfg.data.demo.jobs_used_today}/{cfg.data.demo.jobs_per_day} used today</span>
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8"><Outlet /></div>
         </main>

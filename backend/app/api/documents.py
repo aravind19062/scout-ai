@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import demo
 from app.core.config import get_settings
 from app.core.errors import ExtractionError, NotFoundError, ValidationFailed
 from app.database.session import get_session
@@ -36,6 +37,7 @@ async def upload_document(file: UploadFile = File(...), session: AsyncSession = 
     """Upload a PDF / text / Markdown / HTML document into the library. The file is parsed in memory;
     only extracted text is stored. Nothing in it is ever executed."""
     s = get_settings()
+    demo.forbid_in_demo("Document upload", allowed=s.demo_allow_uploads)
     name = Path(file.filename or "upload").name[:200]
     ext = Path(name).suffix.lower()
     if ext not in ALLOWED:
@@ -92,6 +94,7 @@ async def rag_search(body: RagSearch, session: AsyncSession = Depends(get_sessio
 @router.post("/rag/query")
 async def rag_query(body: RagQuery, session: AsyncSession = Depends(get_session)):
     """Grounded question answering over the library (or a research job's sources)."""
+    await demo.check_budget(session)
     f = RetrievalFilters(collections=[_scope(body.job_id)], source_ids=body.document_ids)
     res = await grounded_answer(session, get_llm(), HybridRetriever(get_embedder()), body.question, f, k=body.k, mode=body.mode)
     return {"answer": res.answer, "insufficient_evidence": res.insufficient_evidence, "citations": [c.__dict__ for c in res.citations],

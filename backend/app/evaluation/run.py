@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import statistics
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,8 +39,9 @@ def _mean(xs):
     return round(statistics.mean(xs), 4) if xs else None
 
 
-async def eval_retrieval(dataset: dict, ks=(1, 3, 5)) -> dict:
-    """Retrieval quality of vector vs keyword vs hybrid over the labelled fixture corpus."""
+async def eval_retrieval(dataset: dict, ks=(1, 3, 5), rerankers: tuple[str, ...] = ("none",)) -> dict:
+    """Retrieval quality of vector vs keyword vs hybrid, each with and without second-stage
+    reranking, over the labelled fixture corpus. Also records retrieval latency per query."""
     coll = "eval:retrieval"
     emb = get_embedder()
     async with session_scope() as s:
@@ -53,11 +55,13 @@ async def eval_retrieval(dataset: dict, ks=(1, 3, 5)) -> dict:
             url_to_id[r.source.url] = d["id"]
     retriever = HybridRetriever(emb)
     out = {}
-    for mode in ("vector", "keyword", "hybrid"):
-        rows = {f"P@{k}": [] for k in ks} | {f"R@{k}": [] for k in ks} | {"MRR": [], f"nDCG@{max(ks)}": []}
+    for mode, rr in [(m, r) for r in rerankers for m in ("vector", "keyword", "hybrid")]:
+        rows = {f"P@{k}": [] for k in ks} | {f"R@{k}": [] for k in ks} | {"MRR": [], f"nDCG@{max(ks)}": [], "ms": []}
         for q in dataset["queries"]:
+            t0 = time.perf_counter()
             async with session_scope() as s:
-                hits = await retriever.search(s, q["query"], RetrievalFilters(collections=[coll]), k=20, mode=mode)
+                hits = await retriever.search(s, q["query"], RetrievalFilters(collections=[coll]), k=20, mode=mode, reranker=rr)
+            rows["ms"].append((time.perf_counter() - t0) * 1000)
             ranked = list(dict.fromkeys(url_to_id[h.url] for h in hits))  # unique documents in rank order
             rel = set(q["relevant"])
             for k in ks:
@@ -65,7 +69,7 @@ async def eval_retrieval(dataset: dict, ks=(1, 3, 5)) -> dict:
                 rows[f"R@{k}"].append(M.recall_at_k(ranked, rel, k))
             rows["MRR"].append(M.mrr(ranked, rel))
             rows[f"nDCG@{max(ks)}"].append(M.ndcg_at_k(ranked, rel, max(ks)))
-        out[mode] = {k: _mean(v) for k, v in rows.items()}
+        out[mode if rr == "none" else f"{mode}+{rr}"] = {k: _mean(v) for k, v in rows.items()}
     return {"queries": len(dataset["queries"]), "by_mode": out}
 
 
@@ -151,18 +155,22 @@ async def main() -> None:
     p.add_argument("--systems", default="direct,rag,agent")
     p.add_argument("--depth", default="quick", choices=["quick", "standard", "deep"])
     p.add_argument("--name", default=None)
+    p.add_argument("--rerankers", default="none,lexical,cross_encoder",
+                   help="retrieval eval: comma-separated rerankers to compare (none, lexical, cross_encoder)")
     a = p.parse_args()
     s = get_settings()
     configure_logging("WARNING")
     init_engine()
     # Measure real cost/latency: never serve system answers from the LLM response cache during evaluation.
     get_llm().use_cache = False
+    # Measure the reranker itself, never its timeout fallback.
+    s.rerank_timeout_s = max(s.rerank_timeout_s, 600.0)
     dataset = json.loads(Path(a.dataset).read_text())  # noqa: ASYNC240 (CLI startup)
     if dataset.get("mode") == "live" and s.is_mock:
         raise SystemExit("This dataset needs real providers (OPENAI/TAVILY); mock mode is configured.")
     started = datetime.now(UTC)
     print(f"Running {a.kind} evaluation on {a.dataset} (providers: {s.mode_summary})")
-    result = await eval_retrieval(dataset) if a.kind == "retrieval" else await eval_e2e(dataset, a.systems.split(","), a.depth)
+    result = await eval_retrieval(dataset, rerankers=tuple(a.rerankers.split(","))) if a.kind == "retrieval" else await eval_e2e(dataset, a.systems.split(","), a.depth)
     meta = {"kind": a.kind, "dataset": Path(a.dataset).name, "started_at": started.isoformat(),
             "duration_s": round((datetime.now(UTC) - started).total_seconds(), 1), "providers": s.mode_summary,
             "mock_mode": s.is_mock, "embedding_model": get_embedder().model}

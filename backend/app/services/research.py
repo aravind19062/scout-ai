@@ -22,10 +22,12 @@ from app.rag.retriever import RetrievalFilters
 from app.schemas.llm_outputs import PlannedTask
 
 
-async def create_job(question: str, depth: str, document_ids: list[uuid.UUID] | None = None) -> ResearchJob:
+async def create_job(question: str, depth: str, document_ids: list[uuid.UUID] | None = None,
+                     client_key: str | None = None) -> ResearchJob:
     cfg = get_depth(depth)
     async with session_scope() as s:
-        job = ResearchJob(question=question.strip(), depth=depth, limits=cfg.as_dict(), provider_mode=get_settings().mode_summary)
+        job = ResearchJob(question=question.strip(), depth=depth, limits=cfg.as_dict(), provider_mode=get_settings().mode_summary,
+                          client_key=client_key)
         s.add(job)
         await s.flush()
         if document_ids:
@@ -66,6 +68,7 @@ async def ask_followup(job_id: uuid.UUID, question: str) -> FollowUp:
     summary = ""
     if report:
         summary = next((sec["markdown"] for sec in report.sections if sec["key"] == "executive_summary"), "")[:3000]
+    ctx.usage.stage = "followup"
     token = bind_usage(ctx.usage)
     try:
         async with session_scope() as s:
@@ -125,6 +128,7 @@ async def regenerate_section(job_id: uuid.UUID, key: str):
     from app.llm.gateway import LLMGateway
 
     ctx.llm = LLMGateway(ctx.llm.provider, ctx.llm.settings, use_cache=False)
+    ctx.usage.stage = "report"
     token = bind_usage(ctx.usage)
     try:
         report = await generate_report(ctx, only=key)

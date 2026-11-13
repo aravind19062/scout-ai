@@ -1,0 +1,87 @@
+# Production / public-demo deployment on a single VM:
+#
+#   cp .env.example .env    # real keys, DOMAIN, strong POSTGRES_PASSWORD, demo limits
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences from the development stack:
+#   * Caddy terminates HTTPS (automatic Let's Encrypt certificates for $DOMAIN) and is the only
+#     service with published ports. Postgres, the API and nginx are reachable only inside the network.
+#   * Research runs in dedicated worker containers (JOB_EXECUTION=worker, Postgres-backed queue).
+#     Scale with `--scale worker=N`; a worker that dies has its jobs requeued by the others.
+#   * Demo guardrails are ON by default (depth cap, per-visitor daily quota, global daily spend cap).
+#   * Optional tracing: `--profile observability` starts Jaeger; set OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318.
+
+x-backend-env: &backend-env
+  APP_ENV: production
+  LOG_JSON: "true"
+  DATABASE_URL: postgresql+psycopg://scout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/scout
+  JOB_EXECUTION: worker
+  RERANKER: ${RERANKER:-cross_encoder}
+  DEMO_MODE: ${DEMO_MODE:-true}
+  CORS_ORIGINS: '["https://${DOMAIN:?set DOMAIN}"]'
+
+services:
+  db:
+    ports: !reset []
+    restart: unless-stopped
+
+  backend:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      <<: *backend-env
+      # Only Caddy -> nginx can reach the API, and Caddy overwrites X-Forwarded-For with the real
+      # client address, so the leftmost forwarded address is trustworthy (used for demo quotas).
+      FORWARDED_ALLOW_IPS: "*"
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+    command: ["python", "-m", "app.worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *backend-env
+    depends_on:
+      backend:
+        condition: service_healthy  # migrations are applied by the API container on start
+    healthcheck:
+      disable: true
+    stop_grace_period: 30s  # SIGTERM -> running jobs are handed back to the queue
+    restart: unless-stopped
+    deploy:
+      replicas: ${WORKER_REPLICAS:-2}
+
+  frontend:
+    ports: !reset []
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.65.0
+    profiles: ["observability"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "127.0.0.1:16686:16686"  # UI on the host only; reach it over an SSH tunnel
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

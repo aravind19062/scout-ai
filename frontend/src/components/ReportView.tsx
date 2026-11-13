@@ -1,5 +1,6 @@
 import { Download, Printer, RefreshCw } from 'lucide-react'
 import { useState } from 'react'
+import { useDemo } from '../hooks/useDemo'
 import { api } from '../services/api'
 import type { ClaimStatus, Report } from '../types/api'
 import { ClaimStatusBadge } from './badges'
@@ -10,6 +11,7 @@ import { Button, Card } from './ui'
 export function ReportView({ jobId, report, onReport }: { jobId: string; report: Report; onReport: (r: Report) => void }) {
   const [busy, setBusy] = useState<string>()
   const [err, setErr] = useState<string>()
+  const demo = useDemo()
   const stats = report.citation_stats
   const claimCounts = Object.entries(stats.claims_by_status ?? {}) as [ClaimStatus, number][]
 
@@ -85,7 +87,7 @@ export function ReportView({ jobId, report, onReport }: { jobId: string; report:
             <section key={s.key} id={`sec-${s.key}`} className="group mb-8 scroll-mt-4">
               <div className="mb-2 flex items-center justify-between border-b border-slate-100 pb-1.5">
                 <h2 className="text-base font-semibold text-slate-900">{s.title}</h2>
-                {s.generated_by === 'llm' ? (
+                {demo?.enabled ? null : s.generated_by === 'llm' ? (
                   <Button variant="ghost" size="sm" className="no-print opacity-0 group-hover:opacity-100" loading={busy === s.key} onClick={() => regenerate(s.key)}>
                     <RefreshCw className="h-3 w-3" /> Regenerate
                   </Button>

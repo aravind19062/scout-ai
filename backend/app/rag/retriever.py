@@ -1,4 +1,5 @@
-"""Hybrid retrieval over pgvector (cosine) and Postgres full-text search, fused with RRF."""
+"""Hybrid retrieval over pgvector (cosine) and Postgres full-text search, fused with RRF,
+optionally re-scored by a cross-encoder reranker (app.rag.rerank)."""
 
 from __future__ import annotations
 
@@ -10,8 +11,10 @@ from sqlalchemy import Select, Text, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.tracing import span
 from app.llm.embeddings import EmbeddingProvider
 from app.models import Chunk, Source
+from app.rag.rerank import get_reranker
 
 RRF_K = 60
 Mode = Literal["hybrid", "vector", "keyword"]
@@ -42,6 +45,7 @@ class RetrievedChunk:
     published_at: str | None
     retrieved_at: str
     security_flags: list[str]
+    rerank_score: float | None = None  # set when a second-stage reranker re-ordered the candidates
 
 
 class HybridRetriever:
@@ -70,8 +74,32 @@ class HybridRetriever:
         k: int = 8,
         mode: Mode | None = None,
         query_vector: list[float] | None = None,
+        reranker: str | None = None,
     ) -> list[RetrievedChunk]:
-        mode = mode or get_settings().retrieval_mode
+        """Top-k chunks for `query`. With a reranker (RERANKER setting, or the `reranker` override:
+        "none" | "lexical" | "cross_encoder"), the top `rerank_candidates` fused results are re-scored
+        and the best k returned."""
+        s = get_settings()
+        mode = mode or s.retrieval_mode
+        reranker = get_reranker(reranker)
+        with span("rag.retrieve", **{"scout.retrieval_mode": mode, "scout.k": k, "scout.reranker": reranker.name}) as sp:
+            pool = max(k, s.rerank_candidates) if reranker.name != "none" else k
+            hits = await self._search(session, query, filters, pool, mode, query_vector)
+            if reranker.name != "none" and hits:
+                with span("rag.rerank", **{"scout.reranker": reranker.name, "scout.candidates": len(hits)}):
+                    hits = await reranker.rerank(query, hits, k)
+            sp.set_attribute("scout.hits", len(hits))
+            return hits[:k]
+
+    async def _search(
+        self,
+        session: AsyncSession,
+        query: str,
+        filters: RetrievalFilters,
+        k: int,
+        mode: Mode,
+        query_vector: list[float] | None,
+    ) -> list[RetrievedChunk]:
         n = max(k, get_settings().retrieval_candidates)
         vec_hits: list[tuple[uuid.UUID, float]] = []
         tiebreak: dict[uuid.UUID, str] = {}

@@ -1,8 +1,9 @@
-import { ArrowLeft, Ban, BookOpen, ExternalLink, FileSearch, ListChecks, Play, RotateCw, ShieldCheck, Activity, AlertTriangle } from 'lucide-react'
+import { Activity, AlertTriangle, ArrowLeft, Ban, BookOpen, Coins, ExternalLink, FileSearch, ListChecks, Play, RotateCw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ActivityFeed } from '../components/ActivityFeed'
 import { DepthBadge, JobStatusBadge } from '../components/badges'
+import { StageBreakdown } from '../components/StageBreakdown'
 import { ClaimList } from '../components/ClaimList'
 import { FollowUpPanel } from '../components/FollowUpPanel'
 import { ReportView } from '../components/ReportView'
@@ -155,6 +156,12 @@ export function ResearchPage() {
               <CardHeader title="Activity" subtitle="Execution log: tools used, decisions and results" icon={<Activity className="h-4 w-4" />} />
               <ActivityFeed events={stream.events} live={active} />
             </Card>
+            {u.by_stage && Object.keys(u.by_stage).length > 0 && (
+              <Card>
+                <CardHeader title="Cost by agent" subtitle="Estimated spend and time attributed to each stage" icon={<Coins className="h-4 w-4" />} />
+                <StageBreakdown stages={u.by_stage} />
+              </Card>
+            )}
             {(j.analysis?.gaps?.length ?? 0) > 0 && (
               <Card>
                 <CardHeader title="Evidence gaps identified" />

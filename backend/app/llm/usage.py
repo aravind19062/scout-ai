@@ -39,26 +39,57 @@ class UsageTracker:
     cost_usd: float = 0.0
     elapsed_offset_s: float = 0.0  # time already spent before a resume
     started_monotonic: float = field(default_factory=time.monotonic)
+    # Attribution: everything recorded is also added to by_stage[stage] (plan, research, verify, …),
+    # so the UI can show where the time and money of a job went. Set by the graph node wrapper.
+    stage: str | None = None
+    by_stage: dict[str, dict] = field(default_factory=dict)
+
+    def _bucket(self) -> dict:
+        b = self.by_stage.get(self.stage or "other")
+        if b is None:
+            b = self.by_stage[self.stage or "other"] = {
+                "llm_calls": 0, "llm_cache_hits": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                "embedding_tokens": 0, "tool_calls": 0, "cost_usd": 0.0, "elapsed_s": 0.0}
+        return b
+
+    def add_stage_time(self, stage: str, seconds: float) -> None:
+        prev, self.stage = self.stage, stage
+        self._bucket()["elapsed_s"] += seconds
+        self.stage = prev
 
     # ---- recording -------------------------------------------------------------------------
     def record_llm(self, prompt_tokens: int, completion_tokens: int, cached: bool = False) -> None:
+        b = self._bucket()
         if cached:
             self.llm_cache_hits += 1
+            b["llm_cache_hits"] += 1
             return
-        s = get_settings()
+        cost = self.llm_cost(prompt_tokens, completion_tokens)
         self.llm_calls += 1
         self.prompt_tokens += prompt_tokens
         self.completion_tokens += completion_tokens
-        self.cost_usd += (
-            prompt_tokens * s.price_input_per_mtok + completion_tokens * s.price_output_per_mtok
-        ) / 1_000_000
+        self.cost_usd += cost
+        b["llm_calls"] += 1
+        b["prompt_tokens"] += prompt_tokens
+        b["completion_tokens"] += completion_tokens
+        b["cost_usd"] += cost
+
+    @staticmethod
+    def llm_cost(prompt_tokens: int, completion_tokens: int) -> float:
+        s = get_settings()
+        return (prompt_tokens * s.price_input_per_mtok + completion_tokens * s.price_output_per_mtok) / 1_000_000
 
     def record_embedding(self, tokens: int) -> None:
+        cost = tokens * get_settings().price_embedding_per_mtok / 1_000_000
         self.embedding_tokens += tokens
-        self.cost_usd += tokens * get_settings().price_embedding_per_mtok / 1_000_000
+        self.cost_usd += cost
+        b = self._bucket()
+        b["embedding_tokens"] += tokens
+        b["cost_usd"] += cost
 
     def record_tool(self, kind: str, success: bool) -> None:
         self.tool_calls += 1
+        self._bucket()["tool_calls"] += 1
         if kind == "search":
             self.search_calls += 1
         elif kind == "fetch":
@@ -106,7 +137,9 @@ class UsageTracker:
 
     def snapshot(self) -> dict:
         d = asdict(self)
-        d.pop("limits"), d.pop("started_monotonic"), d.pop("elapsed_offset_s")
+        d.pop("limits"), d.pop("started_monotonic"), d.pop("elapsed_offset_s"), d.pop("stage")
+        d["by_stage"] = {k: {**v, "cost_usd": round(v["cost_usd"], 6), "elapsed_s": round(v["elapsed_s"], 2)}
+                         for k, v in self.by_stage.items()}
         d["elapsed_s"] = round(self.elapsed_s, 2)
         d["total_tokens"] = self.total_tokens
         d["cost_usd"] = round(self.cost_usd, 6)
@@ -123,6 +156,7 @@ class UsageTracker:
                 if k in snapshot:
                     setattr(t, k, snapshot[k])
             t.elapsed_offset_s = float(snapshot.get("elapsed_s", 0.0))
+            t.by_stage = {k: dict(v) for k, v in (snapshot.get("by_stage") or {}).items()}
         return t
 
 

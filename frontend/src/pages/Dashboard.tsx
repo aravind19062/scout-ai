@@ -1,12 +1,13 @@
-import { Activity, CheckCircle2, Coins, FileSearch, Plus, Search, Trash2 } from 'lucide-react'
+import { Activity, CheckCircle2, Coins, FileSearch, Plus, Search, ShieldCheck, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { DepthBadge, JobStatusBadge } from '../components/badges'
+import { StageBreakdown } from '../components/StageBreakdown'
 import { Button, Card, CardHeader, EmptyState, ErrorState, Spinner, Stat } from '../components/ui'
 import { useAsync } from '../hooks/useAsync'
 import { api } from '../services/api'
 import type { JobStatus } from '../types/api'
-import { fmtInt, fmtUsd, timeAgo } from '../utils'
+import { fmtDuration, fmtInt, fmtUsd, timeAgo } from '../utils'
 
 export function Dashboard() {
   const jobs = useAsync(() => api.listResearch(), [])
@@ -42,11 +43,20 @@ export function Dashboard() {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Stat label="Research sessions" value={fmtInt(usage.data?.jobs)} icon={<FileSearch className="h-4 w-4" />} />
         <Stat label="Active now" value={running} icon={<Activity className="h-4 w-4" />} />
-        <Stat label="Completed" value={fmtInt(usage.data?.by_status?.completed)} icon={<CheckCircle2 className="h-4 w-4" />} />
+        <Stat
+          label="Completed"
+          value={fmtInt(usage.data?.by_status?.completed)}
+          hint={usage.data?.per_completed_job.avg_elapsed_s != null ? `avg ${fmtDuration(usage.data.per_completed_job.avg_elapsed_s)} per report` : undefined}
+          icon={<CheckCircle2 className="h-4 w-4" />}
+        />
         <Stat
           label="Usage"
           value={fmtUsd(usage.data?.cost_usd)}
-          hint={`${fmtInt(usage.data?.total_tokens)} tokens · ${fmtInt(usage.data?.tool_calls)} tool calls · estimate`}
+          hint={[
+            usage.data?.per_completed_job.avg_cost_usd != null && `${fmtUsd(usage.data.per_completed_job.avg_cost_usd)} per report`,
+            usage.data?.llm_cache_hit_rate != null && `${Math.round(usage.data.llm_cache_hit_rate * 100)}% LLM cache hits`,
+            'estimate',
+          ].filter(Boolean).join(' · ')}
           icon={<Coins className="h-4 w-4" />}
         />
       </div>
@@ -98,6 +108,17 @@ export function Dashboard() {
           )}
         </Card>
 
+        <div className="space-y-6">
+        <Card>
+          <CardHeader title="Cost by agent" subtitle="All research sessions" icon={<Coins className="h-4 w-4" />} />
+          <StageBreakdown stages={usage.data?.by_stage ?? {}} />
+          {usage.data?.claims.supported_rate != null && (
+            <p className="flex items-center gap-1.5 border-t border-slate-100 px-5 py-3 text-xs text-slate-500">
+              <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+              {Math.round(usage.data.claims.supported_rate * 100)}% of verified claims supported or partially supported by retrieved evidence
+            </p>
+          )}
+        </Card>
         <Card>
           <CardHeader title="Recent reports" subtitle="Latest completed research" />
           {recentReports.length === 0 ? (
@@ -115,6 +136,7 @@ export function Dashboard() {
             </ul>
           )}
         </Card>
+        </div>
       </div>
     </div>
   )

@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.errors import ScoutError
 from app.core.logging import configure_logging, get_logger
 from app.core.rate_limit import RateLimitMiddleware
+from app.core.tracing import configure_tracing, shutdown_tracing
 from app.database.session import dispose_engine, init_engine
 from app.orchestration.runner import job_manager
 
@@ -36,9 +37,26 @@ async def lifespan(app: FastAPI):
     n = await job_manager.recover_orphans()
     if n:
         log.warning("jobs.recovered", count=n)
+    if s.reranker == "cross_encoder":
+        await _warm_reranker()
+    log.info("app.started", job_execution=s.job_execution, reranker=s.reranker, demo_mode=s.demo_mode,
+             tracing=bool(s.otel_exporter_otlp_endpoint))
     yield
     await job_manager.shutdown()
     await dispose_engine()
+    shutdown_tracing()
+
+
+async def _warm_reranker() -> None:
+    """Download/load the cross-encoder at startup instead of on the first query (non-fatal)."""
+    import asyncio
+
+    from app.rag.rerank import CrossEncoderReranker
+
+    try:
+        await asyncio.to_thread(CrossEncoderReranker(get_settings().reranker_model).warm)
+    except Exception as e:
+        log.error("reranker.warm_failed", error=str(e))
 
 
 def create_app() -> FastAPI:
@@ -65,6 +83,11 @@ def create_app() -> FastAPI:
     app.include_router(system.router)
     app.include_router(research.router)
     app.include_router(documents.router)
+    if configure_tracing():
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+        # SSE streams are long-lived; don't turn every progress event into a span.
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="api/health,api/research/.*/events")
     return app
 
 

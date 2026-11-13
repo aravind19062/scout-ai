@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -18,6 +19,7 @@ from app.core.errors import (
 )
 from app.core.logging import get_logger
 from app.core.text import normalize, quote_in_text
+from app.core.tracing import span
 from app.database.base import utcnow
 from app.database.session import session_scope
 from app.llm.prompts import RESEARCHER_SYSTEM
@@ -50,7 +52,9 @@ class UrlRegistry:
 async def _search(ctx: JobContext, task: ResearchTask, query: str) -> list[SearchResult]:
     await ctx.checkpoint()
     try:
-        results = await ctx.search.search(query, ctx.depth.results_per_query)
+        with span("tool.search", **{"scout.task_key": task.key, "scout.search_provider": ctx.search.name}) as sp:
+            results = await ctx.search.search(query, ctx.depth.results_per_query)
+            sp.set_attribute("scout.results", len(results))
         ctx.usage.record_tool("search", True)
     except ProviderError as e:
         ctx.usage.record_tool("search", False)
@@ -67,7 +71,8 @@ async def _search(ctx: JobContext, task: ResearchTask, query: str) -> list[Searc
 async def _acquire(ctx: JobContext, task: ResearchTask, r: SearchResult, query: str) -> Source | None:
     await ctx.checkpoint()
     try:
-        doc = await ctx.fetcher.fetch(r.url)
+        with span("tool.fetch", **{"scout.task_key": task.key, "server.address": urlsplit(r.url).hostname}):
+            doc = await ctx.fetcher.fetch(r.url)
         ctx.usage.record_tool("fetch", True)
         extracted = extract_by_type(doc.body, doc.content_type, doc.url)
     except (FetchError, UnsafeURLError, ExtractionError) as e:

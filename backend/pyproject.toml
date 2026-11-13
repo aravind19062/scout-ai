@@ -23,6 +23,15 @@ dependencies = [
   "tenacity>=9.2,<10",
   "python-multipart>=0.0.33",
   "markdown-it-py>=4,<5",
+  "opentelemetry-api>=1.30",
+  "opentelemetry-sdk>=1.30",
+  "opentelemetry-exporter-otlp-proto-http>=1.30",
+  "opentelemetry-instrumentation-fastapi>=0.51b0",
+]
+
+[project.optional-dependencies]
+rerank = [
+    "fastembed>=0.7",
 ]
 
 [dependency-groups]

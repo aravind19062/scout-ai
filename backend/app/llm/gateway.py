@@ -20,6 +20,7 @@ from app.core.config import Settings, get_settings
 from app.core.errors import ProviderError
 from app.core.logging import get_logger
 from app.core.text import sha256
+from app.core.tracing import set_attrs, span
 from app.database.session import session_scope
 from app.llm.base import LLMProvider, LLMRequest, T
 from app.llm.usage import current_usage
@@ -68,12 +69,20 @@ class LLMGateway:
             max_output_tokens=max_output_tokens,
         )
         key = self._key(req, schema)
+        with span(f"llm.{task}", **{"gen_ai.operation.name": "chat", "gen_ai.system": self.provider.name,
+                                    "gen_ai.request.model": req.model, "scout.task": task,
+                                    "gen_ai.request.max_tokens": max_output_tokens}) as sp:
+            return await self._structured(req, schema, key, usage, sp)
 
+    async def _structured(self, req: LLMRequest, schema: type[T], key: str, usage, sp) -> T:
+        task = req.task
         if self.use_cache:
             async with session_scope() as s:
                 hit = (await s.execute(select(LLMCacheEntry).where(LLMCacheEntry.key == key))).scalar_one_or_none()
             if hit is not None:
                 usage.record_llm(hit.prompt_tokens, hit.completion_tokens, cached=True)
+                set_attrs(sp, **{"scout.cache_hit": True, "gen_ai.usage.input_tokens": hit.prompt_tokens,
+                                 "gen_ai.usage.output_tokens": hit.completion_tokens, "scout.cost_usd": 0.0})
                 log.debug("llm.cache_hit", task=task)
                 return schema.model_validate(hit.response)
 
@@ -84,6 +93,9 @@ class LLMGateway:
             usage.llm_failures += 1
             raise
         usage.record_llm(resp.prompt_tokens, resp.completion_tokens)
+        set_attrs(sp, **{"scout.cache_hit": False, "gen_ai.response.model": resp.model,
+                         "gen_ai.usage.input_tokens": resp.prompt_tokens, "gen_ai.usage.output_tokens": resp.completion_tokens,
+                         "scout.cost_usd": round(usage.llm_cost(resp.prompt_tokens, resp.completion_tokens), 6)})
         log.info(
             "llm.call",
             task=task,

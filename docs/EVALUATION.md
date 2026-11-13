@@ -77,6 +77,32 @@ on it, and set `RETRIEVAL_MODE` accordingly. While building this, the evaluation
 non-deterministic RRF tie ordering, and pgvector HNSW silently dropping filtered results (now
 `hnsw.iterative_scan = strict_order`).
 
+### Reranking: same 15 queries, each mode with and without a second-stage reranker (2026-11-13)
+
+`uv run --extra rerank python -m app.evaluation.run retrieval --dataset ../evaluation/datasets/retrieval_fixture.json`
+(top 30 fused candidates re-scored; `ms` = mean wall time per query on an Apple-silicon laptop CPU, including
+the one-off model load on the first query).
+
+| mode | P@1 | R@1 | MRR | nDCG@5 | ms/query |
+|---|---|---|---|---|---|
+| vector | 0.933 | 0.822 | 0.956 | 0.967 | 13 |
+| vector + cross-encoder | **1.000** | **0.889** | **1.000** | **1.000** | 459 |
+| vector + lexical | **1.000** | **0.889** | **1.000** | **1.000** | 11 |
+| hybrid | 0.867 | 0.756 | 0.933 | 0.945 | 10 |
+| hybrid + cross-encoder | **1.000** | **0.889** | **1.000** | **1.000** | 372 |
+| hybrid + lexical | **1.000** | **0.889** | **1.000** | **1.000** | 17 |
+| keyword | 0.800 | 0.722 | 0.872 | 0.907 | 7 |
+| keyword + cross-encoder | **1.000** | **0.889** | **1.000** | **1.000** | 240 |
+| keyword + lexical | **1.000** | **0.889** | **1.000** | **1.000** | 7 |
+
+(R@3 and R@5 are 1.0 for every reranked row; for keyword search R@3 improves from 0.90 to 1.00.)
+
+**Reading:** a second stage fixes the top-rank errors of every first-stage retriever on this set (MRR 0.93 → 1.00 for
+hybrid). But the set is **saturated**: the dependency-free lexical reranker ties the cross-encoder, so it cannot show
+whether the model's extra ~0.3 s/query buys anything on real text. The cross-encoder is therefore shipped but
+**off by default in development** (`RERANKER=none`) and on in the production compose file; the deciding experiment is a
+live-web retrieval set (next steps, item 2).
+
 ### End-to-end: 3 questions, `standard` depth, mock providers
 
 Ranges are over 4 repeated runs. The agent is not bit-for-bit deterministic even with mock providers: research tasks run concurrently and race to fetch shared URLs, which changes which task owns a source and which copy of a duplicated page is kept.
@@ -104,5 +130,6 @@ fixture corpus deliberately contains an unreachable page).
 ## Next steps for a credible live evaluation
 
 1. Add keys, run `real_world.json` at `quick` and `standard`, and record results here with date, model and cost.
-2. Extend the labelled retrieval set with live web pages from your domain; compare `RETRIEVAL_MODE`s.
+2. Extend the labelled retrieval set with live web pages from your domain; compare `RETRIEVAL_MODE`s and `RERANKER`s
+   (the fixture set is saturated, see above).
 3. Use a different judge model from the generator; spot-check 20 judged sentences by hand to estimate judge accuracy.
