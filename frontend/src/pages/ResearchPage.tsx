@@ -190,13 +190,23 @@ export function ResearchPage() {
 }
 
 function SourceModal({ jobId, sourceId, onClose }: { jobId: string; sourceId?: string; onClose: () => void }) {
-  const [src, setSrc] = useState<Source>()
-  const [err, setErr] = useState<string>()
+  // Results are tagged with the source they were fetched for, so switching sources shows the
+  // spinner (stale result is ignored) without resetting state synchronously in the effect.
+  const [result, setResult] = useState<{ sourceId: string; src?: Source; err?: string }>()
   useEffect(() => {
-    setSrc(undefined)
-    setErr(undefined)
-    if (sourceId) api.source(jobId, sourceId).then(setSrc).catch((e) => setErr(e.message))
+    if (!sourceId) return
+    let cancelled = false
+    api
+      .source(jobId, sourceId)
+      .then((src) => !cancelled && setResult({ sourceId, src }))
+      .catch((e) => !cancelled && setResult({ sourceId, err: e.message }))
+    return () => {
+      cancelled = true
+    }
   }, [jobId, sourceId])
+  const current = result?.sourceId === sourceId ? result : undefined
+  const src = current?.src
+  const err = current?.err
   return (
     <Modal open={!!sourceId} onClose={onClose} wide title={src?.title ?? 'Source'}>
       {err ? <p className="text-sm text-rose-600">{err}</p> : !src ? <Spinner /> : (
