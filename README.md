@@ -1,5 +1,7 @@
 # SCOUT AI — Autonomous Multi-Agent Research Platform
 
+[![CI](https://github.com/aravind19062/scout-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/aravind19062/scout-ai/actions/workflows/ci.yml)
+
 SCOUT AI takes a complex research question, plans an investigation, searches the web, reads the actual
 source pages and PDFs, extracts evidence with verbatim quotes, **verifies important claims against that
 evidence**, runs more research when evidence is insufficient, and writes a cited report you can question further.
