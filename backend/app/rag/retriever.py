@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
-from sqlalchemy import Select, Text, cast, func, select
+from sqlalchemy import Select, Text, cast, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -68,18 +68,28 @@ class HybridRetriever:
         query: str,
         filters: RetrievalFilters,
         k: int = 8,
-        mode: Mode = "hybrid",
+        mode: Mode | None = None,
         query_vector: list[float] | None = None,
     ) -> list[RetrievedChunk]:
+        mode = mode or get_settings().retrieval_mode
         n = max(k, get_settings().retrieval_candidates)
         vec_hits: list[tuple[uuid.UUID, float]] = []
+        tiebreak: dict[uuid.UUID, str] = {}
         kw_hits: list[uuid.UUID] = []
 
         if mode in ("hybrid", "vector"):
             qv = query_vector or (await self.embedder.embed([query]))[0]
+            # HNSW + WHERE filters: without iterative scans pgvector returns at most ef_search candidates
+            # *before* filtering, silently losing results when other collections dominate the index.
+            await session.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
+            await session.execute(text("SET LOCAL hnsw.ef_search = 100"))
             dist = Chunk.embedding.cosine_distance(qv)
-            stmt = self._filtered(select(Chunk.id, (1 - dist).label("sim")), filters).order_by(dist).limit(n)
-            vec_hits = [(r.id, float(r.sim)) for r in await session.execute(stmt)]
+            stmt = self._filtered(select(Chunk.id, Chunk.content_hash, (1 - dist).label("sim")), filters).order_by(dist).limit(n)
+            rows = list(await session.execute(stmt))
+            # Re-sort with a content-based tie-break so equal distances order deterministically.
+            rows.sort(key=lambda r: (-round(float(r.sim), 9), r.content_hash))
+            vec_hits = [(r.id, float(r.sim)) for r in rows]
+            tiebreak.update({r.id: r.content_hash for r in rows})
 
         if mode in ("hybrid", "keyword"):
             tsq = func.websearch_to_tsquery("english", query)
@@ -89,12 +99,14 @@ class HybridRetriever:
             )
             rank = func.ts_rank_cd(Chunk.tsv, or_q)
             stmt = (
-                self._filtered(select(Chunk.id), filters)
+                self._filtered(select(Chunk.id, Chunk.content_hash), filters)
                 .where(Chunk.tsv.op("@@")(or_q))
-                .order_by(rank.desc(), Chunk.tsv.op("@@")(tsq).desc())
+                .order_by(rank.desc(), Chunk.tsv.op("@@")(tsq).desc(), Chunk.content_hash)
                 .limit(n)
             )
-            kw_hits = [r.id for r in await session.execute(stmt)]
+            kw_rows = list(await session.execute(stmt))
+            kw_hits = [r.id for r in kw_rows]
+            tiebreak.update({r.id: r.content_hash for r in kw_rows})
 
         sims = dict(vec_hits)
         vrank = {cid: i for i, (cid, _) in enumerate(vec_hits)}
@@ -109,7 +121,8 @@ class HybridRetriever:
             fused[cid] = s
         if mode == "vector":
             fused = {cid: sims[cid] for cid in vrank}
-        top = sorted(fused, key=lambda c: -fused[c])[:k]
+        # Deterministic tie-break: fused score, then best vector rank, then keyword rank.
+        top = sorted(fused, key=lambda c: (-fused[c], vrank.get(c, 10**6), krank.get(c, 10**6), tiebreak.get(c, "")))[:k]
         if not top:
             return []
 

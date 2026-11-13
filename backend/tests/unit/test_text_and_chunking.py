@@ -33,7 +33,7 @@ def test_chunking_respects_size_and_overlap():
     assert all(c.token_count <= 120 for c in chunks)
     assert [c.ordinal for c in chunks] == list(range(len(chunks)))
     # consecutive chunks share overlapping text
-    shared = sum(1 for a, b in zip(chunks, chunks[1:]) if a.text.split("\n\n")[-1] in b.text or a.text[-40:] in b.text)
+    shared = sum(1 for a, b in zip(chunks, chunks[1:], strict=False) if a.text.split("\n\n")[-1] in b.text or a.text[-40:] in b.text)
     assert shared >= len(chunks) // 2
 
 

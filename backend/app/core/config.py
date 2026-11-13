@@ -66,7 +66,9 @@ class Settings(BaseSettings):
     # --- RAG ---------------------------------------------------------------------------------
     chunk_size_tokens: int = 450
     chunk_overlap_tokens: int = 60
-    retrieval_candidates: int = 40  # per retriever (vector / keyword) before fusion
+    retrieval_candidates: int = 40
+    # Default retrieval mode for agents/QA. Choose with `python -m app.evaluation.run retrieval` on real embeddings.
+    retrieval_mode: Literal["hybrid", "vector", "keyword"] = "hybrid"  # per retriever (vector / keyword) before fusion
 
     # --- Orchestration -----------------------------------------------------------------------
     max_concurrent_jobs: int = 3

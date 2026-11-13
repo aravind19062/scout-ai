@@ -1,0 +1,20 @@
+{
+  "description": "Labelled retrieval set over the FICTIONAL fixture corpus (backend/app/retrieval/fixtures/corpus.json). Relevant ids were labelled by hand from document content. Works offline (mock embeddings) and with real embeddings.",
+  "queries": [
+    {"query": "How many electric vehicles were sold in Freedonia in fiscal year 2024?", "relevant": ["ministry-ev-report", "duplicate-of-ministry"]},
+    {"query": "Which company leads the electric two-wheeler segment and what is its market share?", "relevant": ["autoinsights-competitors"]},
+    {"query": "What subsidy do electric two-wheeler buyers receive under the incentive scheme?", "relevant": ["ministry-policy"]},
+    {"query": "How large was the Freedonia EV market in US dollars in 2024?", "relevant": ["marketwatch-size", "finpost-size-conflict"]},
+    {"query": "battery pack price per kilowatt-hour in 2024", "relevant": ["battery-tech"]},
+    {"query": "When did the first LFP cell gigafactory start production?", "relevant": ["battery-tech"]},
+    {"query": "Why are electric cars expensive compared with petrol cars?", "relevant": ["challenges"]},
+    {"query": "Where is public charging infrastructure concentrated?", "relevant": ["challenges", "ministry-ev-report", "duplicate-of-ministry"]},
+    {"query": "venture capital investment in EV startups", "relevant": ["investment"]},
+    {"query": "battery recycling capacity shortfall", "relevant": ["investment"]},
+    {"query": "government target for EV penetration by 2030", "relevant": ["outlook"]},
+    {"query": "import duty on fully built electric cars", "relevant": ["ministry-policy"]},
+    {"query": "domestic value addition requirement for manufacturers", "relevant": ["ministry-policy"]},
+    {"query": "sodium-ion battery pilots", "relevant": ["battery-tech"]},
+    {"query": "projected market size by 2030 and CAGR", "relevant": ["marketwatch-size"]}
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "description": "End-to-end questions over the FICTIONAL fixture corpus, for offline (mock) evaluation of pipeline mechanics. Reference facts are taken verbatim from the fixture documents; each fact is matched if all of its keywords appear in the answer.",
+  "mode": "mock",
+  "questions": [
+    {
+      "id": "fr-ev-overview",
+      "question": "Analyse the Freedonia electric vehicle market. Identify market size, major competitors, growth trends and government policy.",
+      "reference_facts": [
+        {"fact": "412,000 EVs sold in FY2024", "keywords": ["412,000"]},
+        {"fact": "Market grew 38% in FY2024", "keywords": ["38 percent"]},
+        {"fact": "Voltra Motors leads two-wheelers with 27%", "keywords": ["Voltra", "27 percent"]},
+        {"fact": "Market size estimates of 3.2bn (MarketLens) vs 4.1bn (Orbis)", "keywords": ["3.2 billion", "4.1 billion"]},
+        {"fact": "GMIS allocates 2.1bn crowns", "keywords": ["2.1 billion"]}
+      ],
+      "expected_domains": ["transport.freedonia.example", "autoinsights.example", "marketlens.example", "finpost.example"]
+    },
+    {
+      "id": "fr-ev-battery",
+      "question": "What battery technology developments are happening in Freedonia's EV sector, and how have battery prices changed?",
+      "reference_facts": [
+        {"fact": "CellNova LFP gigafactory, 5 GWh, Sept 2024", "keywords": ["CellNova", "5 gigawatt-hours"]},
+        {"fact": "Pack prices fell 14% to $118/kWh", "keywords": ["14 percent", "118"]},
+        {"fact": "Sodium-ion pilots, not commercial before 2028", "keywords": ["Sodium-ion", "2028"]}
+      ],
+      "expected_domains": ["batteryjournal.example"]
+    },
+    {
+      "id": "fr-ev-challenges",
+      "question": "What are the main challenges and investment opportunities in the Freedonia EV market?",
+      "reference_facts": [
+        {"fact": "EVs cost 45% more than petrol cars", "keywords": ["45 percent"]},
+        {"fact": "72% of chargers in 5 largest cities", "keywords": ["72 percent"]},
+        {"fact": "VC investment of $640m in 2024", "keywords": ["640 million"]},
+        {"fact": "Battery recycling capacity insufficient by 2027", "keywords": ["recycling", "2027"]}
+      ],
+      "expected_domains": ["mobilityreview.example", "capitalflows.example"]
+    }
+  ]
+}

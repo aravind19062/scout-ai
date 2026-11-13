@@ -1,0 +1,54 @@
+{
+  "description": "Real-world questions for live evaluation (requires OPENAI_API_KEY and TAVILY_API_KEY). Reference facts are long-established, stable facts; each is matched if all keywords appear in the answer (case-insensitive). Expand this set for your own domain.",
+  "mode": "live",
+  "questions": [
+    {
+      "id": "paris-agreement",
+      "question": "What are the temperature goals of the Paris Agreement, and when and where was it adopted?",
+      "reference_facts": [
+        {"fact": "Hold warming well below 2°C", "keywords": ["well below 2"]},
+        {"fact": "Pursue efforts to limit warming to 1.5°C", "keywords": ["1.5"]},
+        {"fact": "Adopted in 2015", "keywords": ["2015"]},
+        {"fact": "Adopted at COP21 in Paris", "keywords": ["COP21"]}
+      ]
+    },
+    {
+      "id": "crispr-nobel",
+      "question": "Who was awarded the Nobel Prize for developing CRISPR-Cas9 genome editing, and in which year and category?",
+      "reference_facts": [
+        {"fact": "Jennifer Doudna", "keywords": ["Doudna"]},
+        {"fact": "Emmanuelle Charpentier", "keywords": ["Charpentier"]},
+        {"fact": "2020", "keywords": ["2020"]},
+        {"fact": "Chemistry", "keywords": ["chemistry"]}
+      ]
+    },
+    {
+      "id": "jwst-mirror",
+      "question": "Describe the James Webb Space Telescope's primary mirror and when the telescope was launched.",
+      "reference_facts": [
+        {"fact": "6.5 metre primary mirror", "keywords": ["6.5"]},
+        {"fact": "18 hexagonal segments", "keywords": ["18", "hexagonal"]},
+        {"fact": "Gold-coated beryllium", "keywords": ["beryllium", "gold"]},
+        {"fact": "Launched December 2021", "keywords": ["2021"]}
+      ]
+    },
+    {
+      "id": "transformer-origin",
+      "question": "Which paper introduced the Transformer architecture, who were its lead authors' affiliations, and when was it published?",
+      "reference_facts": [
+        {"fact": "Attention Is All You Need", "keywords": ["Attention Is All You Need"]},
+        {"fact": "Published 2017", "keywords": ["2017"]},
+        {"fact": "Google Brain / Google Research", "keywords": ["Google"]}
+      ]
+    },
+    {
+      "id": "fame-india",
+      "question": "Summarise India's FAME scheme for electric vehicles: when were phases I and II launched?",
+      "reference_facts": [
+        {"fact": "FAME India launched 2015", "keywords": ["2015"]},
+        {"fact": "FAME II from April 2019", "keywords": ["2019"]},
+        {"fact": "Faster Adoption and Manufacturing of (Hybrid &) Electric Vehicles", "keywords": ["Faster Adoption and Manufacturing"]}
+      ]
+    }
+  ]
+}

@@ -7,7 +7,17 @@ from app.core.text import quote_in_text
 from app.database.session import session_scope
 from app.llm.gateway import LLMGateway
 from app.llm.mock_provider import MockProvider
-from app.models import Chunk, Claim, ClaimEvidence, Finding, Report, ResearchEvent, ResearchJob, ResearchTask, Source
+from app.models import (
+    Chunk,
+    Claim,
+    ClaimEvidence,
+    Finding,
+    Report,
+    ResearchEvent,
+    ResearchJob,
+    ResearchTask,
+    Source,
+)
 from app.orchestration.runner import job_manager
 from app.services import research as svc
 
@@ -104,7 +114,9 @@ async def test_followup_deepen_and_regenerate(db):
 
     rep = await svc.regenerate_section(job.id, "key_findings")
     assert rep.version == 2
-    with pytest.raises(Exception):
+    from app.core.errors import ConflictError
+
+    with pytest.raises(ConflictError):
         await svc.regenerate_section(job.id, "references")
 
     await svc.deepen(job.id, "battery recycling capacity")
@@ -141,8 +153,9 @@ async def test_cancellation(db, monkeypatch):
 
 
 async def test_budget_limit_halts_gracefully(db, monkeypatch):
-    import app.orchestration.depth as depth
     from dataclasses import replace
+
+    import app.orchestration.depth as depth
 
     tiny = replace(depth.DEPTHS["standard"], max_tool_calls=3)
     monkeypatch.setitem(depth.DEPTHS, "standard", tiny)

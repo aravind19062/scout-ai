@@ -39,7 +39,7 @@ async def grounded_answer(
     question: str,
     filters: RetrievalFilters,
     k: int = 10,
-    mode: Mode = "hybrid",
+    mode: Mode | None = None,
     extra_context: str = "",
     max_context_tokens: int = 6000,
 ) -> QAResult:

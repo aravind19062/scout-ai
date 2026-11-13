@@ -34,7 +34,7 @@ async def dedupe_tasks(
     out = []
     for cand, v in zip(candidates, vecs[len(existing_objectives) :], strict=True):
         dup = any(cosine(v, kv) >= threshold for kv in kept_vecs) or any(
-            normalize(cand.objective) == normalize(t) or (overlap(cand.objective, t) >= 0.9 and overlap(t, cand.objective) >= 0.9)
+            normalize(cand.objective) == normalize(t) or (overlap(cand.objective, t) >= 0.8 and overlap(t, cand.objective) >= 0.8)
             for t in kept_texts
         )
         if not dup:
